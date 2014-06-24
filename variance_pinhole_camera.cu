@@ -15,6 +15,7 @@ rtDeclareVariable(uint2, launch_index, rtLaunchIndex, );
 rtDeclareVariable(uint2, launch_dim, rtLaunchDim, );
 rtDeclareVariable(float3, bad_color, , );
 rtBuffer<uchar4, 2> output_buffer;
+rtBuffer<float3, 2> queue_buffer;
 rtDeclareVariable(float3, eye, , );
 rtDeclareVariable(float3, U, , );
 rtDeclareVariable(float3, V, , );
@@ -53,12 +54,10 @@ static __device__ __inline__ void avgColor( const uint2& index )
 {
   size_t2 screen = output_buffer.size();         //size of the screen
   float3 color = make_float3(0);                 //keeps track of the colors at each pixel in the block
-  float3 variance[block_size*block_size];        //keeps a running total of the colors at each pixel in the block
   float variance_red = 0;						 //variance in the reds
   float variance_green = 0;						 //variance in the greens
   float variance_blue = 0;						 //variance in the blues
   float variance_total = 0;					     //total variance of the colors
-  unsigned int count = 0;						 //used to assign values in the variance array
 
   //make sure we look at pixels that are on the screen
   unsigned int min_x = max( index.x-half_block_size, 0u );
@@ -69,14 +68,10 @@ static __device__ __inline__ void avgColor( const uint2& index )
   for ( unsigned int i = min_x; i < max_x; ++i ) {
     for ( unsigned int j = min_y; j < max_y; ++j ) {
         //keep a running total of the color values
-		variance[count] = trace(make_float2(i, j));
-		color += variance[count];
-		count++;
+		queue_buffer[make_uint2(i,j)] = trace(make_float2(i, j));
+		color += queue_buffer[make_uint2(i,j)];
     }
   }
-
-  //reset count for the next loop
-  count = 0;
 
   //calculate the average color of the block of pixels 
   color /= (block_size * block_size);
@@ -85,19 +80,20 @@ static __device__ __inline__ void avgColor( const uint2& index )
     for ( unsigned int j = min_y; j < max_y; ++j ) {
 	  //variance sum += (sample color - average color)^2      for each sample
 	  //calculate variance of each color
-	  variance_red += (variance[count].x - color.x) * (variance[count].x - color.x);
-      variance_green += (variance[count].y - color.y) * (variance[count].y - color.y);
-      variance_blue += (variance[count].z - color.z) * (variance[count].z - color.z);
-	  count++;
+	  float3 temp = queue_buffer[make_uint2(i,j)];
+
+	  variance_red += (temp.x - color.x) * (temp.x - color.x);
+      variance_green += (temp.y - color.y) * (temp.y - color.y);
+      variance_blue += (temp.z - color.z) * (temp.z - color.z);
     }
   }
 
-  
   //variance = variance sum / num samples
-  //multiplied by 8 to accentuate colors more
-  variance_red = sqrtf((variance_red / (block_size * block_size)));// * 8;
-  variance_green = sqrtf((variance_green / (block_size * block_size)));// * 8;
-  variance_blue = sqrtf((variance_blue / (block_size * block_size)));// * 8;
+  //standard deviation = sqrtf(variance)
+  //multiplied to accentuate colors more
+  variance_red = sqrtf((variance_red / (block_size * block_size)))*2;// * 8;
+  variance_green = sqrtf((variance_green / (block_size * block_size)))*2;// * 8;
+  variance_blue = sqrtf((variance_blue / (block_size * block_size)))*2;// * 8;
 
   //calculate the luminance value of the three variances
   variance_total = optix::luminance(make_float3(variance_red, variance_green, variance_blue));
@@ -106,10 +102,8 @@ static __device__ __inline__ void avgColor( const uint2& index )
     for ( unsigned int j = min_y; j < max_y; ++j ) {
 	  //set the color of all the pixels in the block to the amount of variance among them
 	  output_buffer[make_uint2(i, j)] = make_color(make_float3(variance_total));
-	  //output_buffer[make_uint2(i, j)] = make_color(make_float3((variance_red-1)*-1));
 	}
   }
-
 }
 
 

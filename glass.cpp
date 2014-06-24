@@ -208,7 +208,13 @@ void  GlassScene::createContext( InitialCameraData& camera_data )
   Variable output_buffer = m_context["output_buffer"];
   Buffer buffer = createOutputBuffer( RT_FORMAT_UNSIGNED_BYTE4, WIDTH, HEIGHT );
   output_buffer->set(buffer);
-  
+
+  // Queue buffer
+  Buffer queue_buffer = m_context->createBuffer(RT_BUFFER_INPUT_OUTPUT | RT_BUFFER_GPU_LOCAL, RT_FORMAT_FLOAT3, WIDTH, HEIGHT);
+  memset(queue_buffer->map(), 0, WIDTH*HEIGHT*sizeof(float3));
+  queue_buffer->unmap();
+  m_context["queue_buffer"]->set(queue_buffer);
+
   // Pinhole Camera ray gen and exception program
   std::string         ptx_path = ptxpath( "glass", "pinhole_camera.cu" );
   m_context->setRayGenerationProgram( Pinhole, m_context->createProgramFromPTXFile( ptx_path, "pinhole_camera" ) );
